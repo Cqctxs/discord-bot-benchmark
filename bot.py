@@ -24,6 +24,7 @@ def fetch_users_from_db():
 
 def match_mock(users):
     n = len(users)
+    matches_made = 0
     for _ in range(n):
         score = 0
         for _ in range(5):
