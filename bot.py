@@ -2,6 +2,7 @@ import discord
 import psycopg2.pool
 import os
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 TOKEN = os.environ["BOT_TOKEN"]  # Set this in Railway Variables, never hardcode
 
@@ -9,9 +10,24 @@ intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
 
-db_pool = psycopg2.pool.SimpleConnectionPool(
-    minconn=1, maxconn=10, dsn=os.environ["DATABASE_URL"]
-)
+# Provide a large thread pool so we don't hit the default low limits (e.g., 5 threads on 1 vCPU)
+executor = ThreadPoolExecutor(max_workers=200)
+
+from psycopg2.pool import ThreadedConnectionPool
+from queue import Queue, Empty
+import time
+
+
+class BlockingConnectionPool(ThreadedConnectionPool):
+    def getconn(self, key=None):
+        while True:
+            try:
+                return super().getconn(key)
+            except psycopg2.pool.PoolError:
+                time.sleep(0.01)
+
+
+db_pool = BlockingConnectionPool(minconn=1, maxconn=10, dsn=os.environ["DATABASE_URL"])
 
 
 def fetch_users_from_db():
@@ -55,8 +71,8 @@ async def on_message(message):
 
         # Run blocking operations in an executor to prevent blocking the event loop
         loop = asyncio.get_event_loop()
-        users = await loop.run_in_executor(None, fetch_users_from_db)
-        matches = await loop.run_in_executor(None, match_mock, users)
+        users = await loop.run_in_executor(executor, fetch_users_from_db)
+        matches = await loop.run_in_executor(executor, match_mock, users)
 
         await message.channel.send(f"Success {test_id}: {matches} matches made.")
 
